@@ -1,0 +1,256 @@
+# 宿舍电量哨兵 · OpenWrt 版 配置
+#
+# 改完记得 uci commit powerfee（或直接编辑本文件后重启服务）。
+# 本文件含邮箱授权码，安装脚本会把它设为 600 权限，别提交到公开仓库。
+
+config powerfee 'main'
+	# 总开关：0 = 只保留命令行查询，不发邮件也不定时查
+	option enabled '1'
+
+	# 要监控的房间（单房间模式，用 powerfee set-room <房间号> 自动填好这四项）。
+	# 想同时监控多个房间 / 给不同房间发不同收件人时，改用下面的 config room 段：
+	# 只要存在任何一个 config room 段，这四项就只当「默认房间」兜底用。
+	option room_num ''
+	option campus ''
+	option building ''
+	option room ''
+
+	# 查询间隔（秒）。接口一次返回全校房间时响应可能很大，间隔别设太短
+	option interval '1800'
+	# 查询失败后的重试间隔（秒）
+	option retry_interval '300'
+
+	# 查询时段（留空 = 全天查询，与旧版行为一致）——只在指定时段内请求接口，减少夜间请求。
+	# 格式 HH:MM-HH:MM，多段用空格分隔；起 > 止 表示跨越午夜；起止相同表示全天；
+	# 边界是「含起点、不含终点」（07:00-23:00 = 07:00 开始查、23:00 起停止）。
+	# 窗口外不发请求；窗口外的时长不计入「监控失效」判定，不会因为夜里没查而误报；
+	# 需要立刻查一次用 powerfee check --force。
+	option active_hours ''
+
+	# 状态与历史目录（默认 /etc/powerfee；一般不用改，多实例/测试时才需要）
+	#option state_dir '/etc/powerfee'
+
+	# 低于 threshold -> 电费不足（红）；低于 threshold × warn_ratio -> 预警（黄）
+	option threshold '20'
+	option warn_ratio '2'
+
+	# 同一档位重复提醒的最小间隔（分钟）
+	option cooldown '180'
+
+	# 进入预警区是否也发邮件；充值恢复、监控失效是否发邮件
+	option notify_warn '1'
+	option notify_recovery '1'
+	option notify_error '1'
+	# 连续多少小时取不到数据算「监控失效」（notify_error=1 时发信）
+	option stale_hours '6'
+
+	# —— 每日用电量（1.2.0）——
+	# 每天几点发一份「今日用量 + 最近 report_days 天曲线」的报告（留空 = 不发）。
+	# 格式 HH:MM（如 21:00）。报告走邮件 + 推送，用各房间自己的收件人与账号；
+	# 报告是独立事件：不改告警档位、不影响冷却与去重。
+	# 报告时间不在 active_hours 时段内也能发（曲线来自逐日接口，与查询时段无关；
+	# 「今日用量」用当天已有的本地采样）。
+	option report_time ''
+	# 报告/告警邮件里曲线的天数（默认 7）
+	option report_days '7'
+
+	# 运行日志（同时也会写 syslog：logread -e powerfee）
+	option log_file '/etc/powerfee/powerfee.log'
+	option log_max_kb '128'
+
+# ============================================================================
+# 多房间（可选）—— 想同时监控几个房间、或让不同房间的提醒发给不同的人，
+# 就照着下面加 config room 段（powerfee room-add <房间号> 会自动生成并填好名字）。
+#
+# 每个房间的判定、冷却、状态（state.<段名>）、历史（history.<段名>.csv）都是独立的；
+# 接口仍然只请求一次，结果按编号分发给各房间。
+# 留空 = 继承：threshold 继承 main.threshold，mail_to 继承 mail.to，
+# notify_url/notify_token 继承 notify.url/notify.token，notify_enabled 继承 notify.enabled。
+#
+# 老用户升级提示：把第一个房间的 num 设成原来的 main.room_num 时，powerfee check
+# 或 room-add 会把老的 state / history.csv 继承给这个房间（老文件保留），不会丢历史。
+# ============================================================================
+#config room 'room1'
+#	option enabled '1'
+#	option num '1001'              # 接口里的房间编号（必填）
+#	option label ''                # 展示名；留空用「楼栋 房间」
+#	option campus ''
+#	option building ''
+#	option room ''
+#	option threshold ''            # 留空继承 main.threshold
+#	option mail_to ''              # 留空继承 mail.to；可写多个，逗号分隔
+#	option mail_account ''         # 用哪个发件账号（见下面的 config mail_account）；留空 = mail 段
+#	option notify_account ''       # 用哪个推送账号（见下面的 config push_account）；留空 = notify 段
+#	option notify_url ''           # 留空继承（推送账号 → notify 段）；也可写自己的
+#	option notify_token ''         # 同上，留空继承
+#	option notify_enabled ''       # 留空继承 notify.enabled；1/0 可单独开关这个房间的推送
+
+
+# ============================================================================
+# 查询接口 —— 换成你学校的接口时，只需要改这一段（详见 README「适配你的学校」）
+# ============================================================================
+config api 'api'
+	# 完整接口地址（含查询参数）。留空则服务只记日志、不查询。
+	option url ''
+
+	# 请求方式与请求体
+	option method 'POST'
+	option content_type 'application/x-www-form-urlencoded'
+	option body ''
+
+	option timeout '40'
+	# 本机 DNS 解析不了接口域名时，用这些 DNS 解析后再直连
+	option dns_servers '223.5.5.5 119.29.29.29'
+
+	# —— 返回结构映射（jsonfilter 表达式）——
+	# 房间数组：接口返回里「每个房间一个元素」的那一层
+	option rooms_path '@.obj[*]'
+	# 成功标志：留空 = 不检查。填了就必须等于 ok_value 才认为查询成功
+	option ok_path ''
+	option ok_value 'true'
+	# 错误信息字段（失败时用来告诉你原因）
+	option msg_path ''
+
+	# —— 房间对象的字段名映射 ——
+	option field_id 'roomNum'          # 房间唯一编号
+	option field_name 'room'           # 房间名（你搜索/看到的名字）
+	option field_building 'building'   # 楼栋名（没有就留空）
+	option field_campus 'schoolArea'   # 校区名（没有就留空）
+	option field_balance 'powerBalance' # 余额字段
+	option unit '度'                    # 余额单位（度 / kWh / 元 …）
+	# 余额单位的字段名：接口返回里有就优先用它（如 du 字段恒为「度」），
+	# 拿不到再回落到上面的 unit。留空 = 只用 unit。
+	option unit_field 'du'
+
+	# ==========================================================================
+	# 每日用电量接口（1.2.0，可选）—— 填好 daily_url 后 powerfee usage / report
+	# 就有「逐日用电量」，不再依赖本地采样估算。留空 = 不启用（自动退回估算）。
+	#
+	# 模板占位符：{room} 房间号、{month} YYYY-MM、{page} 页码、{page_size} 每页天数。
+	# 例（换成你学校的地址与接口参数）：
+	#   option daily_url 'https://你的学校/user/powerfee/getDailyDetails'
+	#   option daily_body 'roomNum={room}&lastDate={month}&type=2&pageNum={page}&pageSize={page_size}&implType=你的接口参数&token=&from='
+	# ==========================================================================
+	option daily_url ''
+	option daily_body 'roomNum={room}&lastDate={month}&type=2&pageNum={page}&pageSize={page_size}'
+	option daily_method 'POST'
+	option daily_content_type 'application/x-www-form-urlencoded'
+	option daily_timeout '30'
+	option daily_page_size '31'        # {page_size} 的取值；一个月最多 31 天
+
+	# —— 逐日返回结构映射（jsonfilter 表达式 / 字段名）——
+	option daily_path '@.obj.dailyDetailsInfos[*]'  # 逐日明细数组（每个元素一行）
+	option daily_ok_path '@.ret'       # 成功标志；留空 = 不检查
+	option daily_ok_value 'true'
+	option daily_msg_path '@.msg'
+	option daily_date_field 'dateTime'      # 日期（YYYY-MM-DD）
+	option daily_used_field 'dailyUsed'     # 当日用电量
+	option daily_total_field 'totalUsed'    # 终身累计（单调递增；跨月补齐要用）
+	option daily_unit_field 'dailyUsedUnit' # 单位字段（拿不到就用 api.unit）
+
+config mail 'mail'
+	# 邮件提醒总开关
+	option enabled '0'
+	# auto = 有 python3 用 python3，否则用 msmtp；也可写死 python3 / msmtp
+	option transport 'auto'
+
+	# SMTP 服务器。QQ 邮箱：smtp.qq.com:465 ssl（密码填「授权码」不是登录密码）
+	#                 163 邮箱：smtp.163.com:465 ssl
+	#                 Gmail  ：smtp.gmail.com:465 ssl
+	#                 自建/企业邮：常见 587 starttls
+	option host 'smtp.qq.com'
+	option port '465'
+	option security 'ssl'
+
+	option user ''
+	option password ''
+	# 发件人，留空则用 user
+	option from ''
+	option from_name '宿舍电量哨兵'
+	# 收件人，多个用逗号分隔
+	option to ''
+	# 0 = 不校验 SMTP 服务器证书（自签证书时用）
+	option tls_verify '1'
+
+# ============================================================================
+# 通知推送（webhook）—— 余额告警时往一个 HTTP 地址推一条消息，
+# 可接到微信 / QQ 机器人、企业微信、Bark、ntfy 等（具体配方见 README「推到微信 / QQ」）。
+# 与 mail 段互相独立：可以只开推送不开邮件。
+# ============================================================================
+config notify 'notify'
+	# 推送总开关（0 = 关闭；邮件开关 mail.enabled 与本开关互不影响）
+	option enabled '0'
+
+	# 要推送到的地址（例：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx）
+	option url ''
+	# POST | GET（GET 时把渲染结果当 query string 拼到 url 后面）
+	option method 'POST'
+	option content_type 'application/json'
+
+	# 请求体模板。占位符：{text} 单行摘要、{title} 邮件同款标题、
+	# {room} {balance} {unit} {level} {reason} {daily} {days_left} {time} {device}
+	# 另有 {chart}：多行文本曲线（powerfee report / 定时报告推送时才有值；
+	# 换行会转义成 JSON 的 \n，所以只适合 JSON 请求体，GET 模板里别用）。
+	# （值会做 JSON 安全转义；未知占位符原样保留）
+	option body '{"text":"{text}"}'
+
+	# 可选鉴权：token 放在 token_header 指定的请求头里（值原样使用，不加 Bearer 前缀）
+	option token ''
+	option token_header 'Authorization'
+
+	# 推送请求超时（秒）
+	option timeout '15'
+
+	# —— 查询端点（给机器人/局域网设备用 HTTP 读余额）——
+	# 开启后地址为 https://<路由器IP>:8443/cgi-bin/powerfee?token=...&cmd=...
+	option http_enabled '0'
+	# 端点要求的 token；留空 = 端点关闭（两者必须同时满足才可用）
+	option http_token ''
+
+# ============================================================================
+# 命名发件账号（可选，1.2.0）—— 想用「不同房间从不同邮箱发出」时，
+# 照着下面加 config mail_account 段（powerfee mail-account add <名> 会自动生成），
+# 再在房间上写 mail_account '<名>'（powerfee room-set <房间段名> mail_account <名>）。
+#
+# 账号段只描述「发件方」，收件人仍然由房间的 mail_to 决定；
+# 任何字段留空 = 继承上面 mail 段的同名字段（所以只填和默认邮箱不同的那几项即可）。
+# host / user / password 最终为空则该账号不可用（会在日志与 powerfee status 里说清缺哪个，
+# 并回退到 mail 段继续发提醒，不会静默丢失）。
+# 邮件总开关仍然是 mail.enabled：账号段不能绕过它。
+# ============================================================================
+#config mail_account 'qq_main'
+#	option enabled '1'
+#	option transport ''      # auto|python3|msmtp；留空继承 mail.transport
+#	option host ''           # 留空继承 mail.host
+#	option port ''           # 留空继承 mail.port
+#	option security ''       # 留空继承 mail.security
+#	option user ''           # 邮箱账号（QQ/163 用完整邮箱地址）
+#	option password ''       # 授权码，不是网页登录密码
+#	option from ''           # 留空继承 mail.from（再留空则用 user）
+#	option from_name ''      # 留空继承 mail.from_name
+#	option tls_verify ''     # 留空继承 mail.tls_verify
+
+# ============================================================================
+# 命名推送账号（可选，1.2.0）—— 想用「不同房间推到不同通道」时，
+# 照着下面加 config push_account 段（powerfee push-account add <名> --channel <通道>），
+# 再在房间上写 notify_account '<名>'（powerfee room-set <房间段名> notify_account <名>）。
+#
+# 取值优先级（与 LuCI / 文档同一份契约）：
+#   基底 = 房间 notify_account 指定的账号（未指定 → notify 段）
+#   → 房间级 notify_url / notify_token 覆盖基底的同名字段
+#   → 房间级 notify_enabled（空则继承 notify.enabled）为 0 则不推
+# 字段留空 = 继承 notify 段；channel=clawbot 且 url 为空时用本机 ClawBot API
+# （http://127.0.0.1:<weclawbot-api 端口>/bots/<bot_id>/messages）。
+# 引用了不存在的账号名会写日志并在 powerfee status / json 里标出来，同时回退到 notify 段。
+# ============================================================================
+#config push_account 'sc_room1'
+#	option enabled '1'
+#	option channel ''        # serverchan|wecom|clawbot|custom；留空继承 notify
+#	option url ''            # 留空继承 notify.url；channel=clawbot 且 url 为空时用本地 ClawBot API
+#	option method ''         # 留空继承 notify.method
+#	option content_type ''   # 留空继承 notify.content_type
+#	option body ''           # 留空继承 notify.body
+#	option token ''          # Server酱 的 SendKey / ClawBot 的 api_token / 自定义通道的鉴权令牌
+#	option token_header ''   # 留空继承 notify.token_header
+#	option timeout ''        # 留空继承 notify.timeout
+#	option bot_id ''         # channel=clawbot 时的 bot id

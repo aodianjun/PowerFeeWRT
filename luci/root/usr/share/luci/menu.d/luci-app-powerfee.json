@@ -1,0 +1,58 @@
+{
+	"admin/services/powerfee": {
+		"title": "宿舍电量哨兵",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-powerfee" ],
+			"uci": { "powerfee": true }
+		}
+	},
+
+	"admin/services/powerfee/overview": {
+		"title": "状态",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "powerfee/overview"
+		}
+	},
+
+	"admin/services/powerfee/usage": {
+		"title": "用电量",
+		"order": 15,
+		"action": {
+			"type": "view",
+			"path": "powerfee/usage"
+		}
+	},
+
+	"admin/services/powerfee/room": {
+		"title": "宿舍管理",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "powerfee/room"
+		}
+	},
+
+	"admin/services/powerfee/settings": {
+		"title": "设置",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "powerfee/settings"
+		}
+	},
+
+	"admin/services/powerfee/wechat": {
+		"title": "微信推送",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "powerfee/wechat"
+		}
+	}
+}

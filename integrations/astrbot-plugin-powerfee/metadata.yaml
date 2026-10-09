@@ -1,0 +1,12 @@
+name: astrbot_plugin_powerfee
+display_name: 宿舍电量哨兵
+desc: 在聊天里查询路由器上 powerfee 的电费余额：单行摘要 / 完整状态 / 房间搜索 / 历史 / 日志。
+short_desc: 聊天查宿舍电费余额（powerfee）。
+version: v1.0.0
+author: PowerFeeWRT
+repo: "https://github.com/aodianjun/PowerFeeWRT"
+astrbot_version: ">=4.16,<5"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - qq_official_webhook

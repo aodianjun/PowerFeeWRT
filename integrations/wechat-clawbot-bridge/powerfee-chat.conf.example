@@ -1,0 +1,62 @@
+# powerfee-chat 配置示例 —— 复制到 /etc/powerfee-chat.conf 并 chmod 600
+#
+# 语法: KEY=VALUE，# 开头是注释。改完执行 /etc/init.d/powerfee-chat reload
+
+# ---------- 消息来源（三选一，默认 logread = 原生服务）----------
+# logread : logread -f [-e <LOGREAD_FILTER>]           （原生 weclawbot-api 服务，stdout 进 syslog）
+# logfile : tail -F -n 0 <LOGFILE>                     （服务把 stdout 落文件）
+# docker  : docker logs -f -t --since 1s <CONTAINER>   （旧容器部署，回退用）
+SOURCE=logread
+
+# SOURCE=logread 时用：logread -e 的过滤模式（正则，匹配整行）。
+# 重要：procd 用 /bin/sh -c 启动原生服务，procd 捕获的 stdout 在 syslog 里
+#       tag 是 "sh[pid]"（不是 weclawbot-api），所以按 tag 过滤抓不到消息行；
+#       这里按消息内容过滤。留空 = 不过滤（全量扫描，靠解析器筛）。
+LOGREAD_FILTER=Message from
+
+# SOURCE=logfile 时用：
+# LOGFILE=/var/log/weclawbot.log
+
+# SOURCE=docker 时用（旧容器）：
+# CONTAINER=weclawbot-api
+# DOCKER_LOG_ARGS=--since 1s
+
+# 二进制路径（一般不用改）
+# DOCKER_BIN=/usr/bin/docker
+# TAIL_BIN=/usr/bin/tail
+# LOGREAD_BIN=/sbin/logread
+
+# ---------- 发送侧（ClawBot HTTP API）----------
+API_BASE=http://127.0.0.1:26322
+BOT_ID=a1b2c3d4e5f6@im.bot
+# api_token 优先从这里读：结构为 {"bots": {"<bot_id>": {"api_token": "..."}}}
+AUTH_JSON=/etc/weclawbot/config/auth.json
+# 也可以直接写死（注意本文件权限 600；留空则用 AUTH_JSON）
+API_TOKEN=
+
+# ---------- powerfee ----------
+POWERFEE_BIN=/usr/bin/powerfee
+
+# ---------- 关键词（逗号或空格分隔）----------
+QUERY_KEYWORDS=电量,电费,查电费,余额,剩余,balance
+DETAIL_KEYWORDS=详情,全部,detail,all,full
+HELP_KEYWORDS=帮助,help,菜单,指令
+# 每日用电量曲线（1.2.0）：命中后调 `powerfee json usage --days N`，回文本曲线。
+# 曲线关键词先于「电量」判断（「用电量」这类消息回曲线，不回单行余额）。
+USAGE_KEYWORDS=曲线,用电,用量,趋势,usage,chart
+# 曲线天数（默认 7；文本图按 32 列宽渲染，微信里不会折行）
+USAGE_DAYS=7
+
+# ---------- 行为 ----------
+# 同一用户同一类指令 N 秒内只回一次（防刷屏）
+THROTTLE_SECONDS=3
+# 不带时间戳的重复日志行在 N 秒内只处理一次（带时间戳的行用长窗口精确去重）
+DEDUP_SECONDS=5
+# 额外忽略的消息来源（逗号分隔）；from == bot 自己的行总是忽略（防回环）
+IGNORE_FROM=
+# 忽略这些 syslog tag 的行（防自回环：本桥接自己的日志里会内嵌原始消息行）
+IGNORE_TAGS=powerfee-chat
+# 每日定时推送余额，格式 HH:MM（路由器本地时间），留空=关闭
+DAILY_PUSH_TIME=
+# 额外日志文件（syslog 之外再落一份；留空=仅 syslog）
+LOG_FILE=

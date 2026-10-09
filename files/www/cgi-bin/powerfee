@@ -1,0 +1,167 @@
+#!/bin/sh
+# ============================================================================
+# 宿舍电量哨兵 · 查询端点（uhttpd CGI）
+#
+# 安装位置：/www/cgi-bin/powerfee（0755）。uhttpd 以 `-h /www -x /cgi-bin`
+# 提供，所以真实地址是：
+#     https://<路由器IP>:8443/cgi-bin/powerfee?token=<http_token>&cmd=<子命令>
+# （HTTPS，自签证书 → 客户端用 curl -k 或信任该证书；uhttpd 开了 rfc1918_filter，
+#   端点只在局域网可达。nginx 的 80/443 只服务 LuCI，不服务 /cgi-bin。）
+#
+# 接口形状（固定，勿改）：
+#   GET/POST ?token=<notify.http_token>&cmd=<子命令>[&kw=<关键词>][&limit=<n>][&n=<行数>]
+#     * token 必须等于 notify.http_token，否则 403 {"error":"bad token"}
+#     * notify.http_enabled=0 或 http_token 为空 → 一律 403 {"error":"endpoint disabled"}
+#     * cmd 白名单：status brief groups rooms room-list history log check usage
+#                   wechat-status wechat-qr wechat-enable wechat-test；其余 400
+#     * rooms 支持 kw/limit；history 支持 n；log 支持 n
+#     * room-list 返回已配置房间的列表（含余额/档位/收件人/掩码后的推送地址）
+#     * usage 返回逐日用电量（默认房间、最近 main.report_days 天；含 days/summary/文本曲线，
+#       不含 png_base64）—— 不接受参数，只读
+#     * check 会真的查一次（可能触发告警推送/邮件）—— 有意为之
+#       （配置了查询时段 active_hours 且当前在窗口外时，check 会跳过，返回 skipped=true）
+#     * wechat-* 走 /usr/bin/powerfee wechat（助手 /usr/lib/powerfee/wechat.py）：
+#         wechat-status  JSON 状态（服务形态/运行/绑定/激活/推送配置/最近一次推送）
+#         wechat-qr      二维码 PNG（Content-Type: image/png，二进制；
+#                        拿不到二维码时 404 + JSON 说明，绝不混入日志噪声）
+#         wechat-enable  一键写 notify 配置 + commit + 发测试消息（写操作！返回里不含令牌）
+#         wechat-test    只发一条测试消息
+#   响应：Content-Type: application/json; charset=utf-8、Cache-Control: no-store，
+#         body 就是 `powerfee json <cmd>` / `powerfee wechat <cmd>` 的输出。
+#
+# 安全：必须设 token；子命令以只读为主（check 会触发外部动作，wechat-enable 会改配置，
+#       两者都是有意开放给持有 token 的机器人/局域网设备的）。
+# ============================================================================
+
+HTTP_TOKEN=$(uci -q get powerfee.notify.http_token 2>/dev/null)
+HTTP_ENABLED=$(uci -q get powerfee.notify.http_enabled 2>/dev/null)
+
+reply() {
+	# reply <HTTP 状态行> <JSON 正文>
+	printf 'Status: %s\r\n' "$1"
+	printf 'Content-Type: application/json; charset=utf-8\r\n'
+	printf 'Cache-Control: no-store\r\n'
+	printf '\r\n'
+	printf '%s\n' "$2"
+	exit 0
+}
+
+# ---- URL 解码（%XX 与 +），用 awk 按字节处理，UTF-8 原样还原 -----------------
+urldecode() {
+	printf '%s' "$1" | awk '{
+		s = $0
+		out = ""
+		while (length(s) > 0) {
+			c = substr(s, 1, 1)
+			if (c == "%" && length(s) >= 3) {
+				hex = toupper(substr(s, 2, 2))
+				if (hex ~ /^[0-9A-F][0-9A-F]$/) {
+					n = 0
+					for (i = 1; i <= 2; i++)
+						n = n * 16 + index("0123456789ABCDEF", substr(hex, i, 1)) - 1
+					out = out sprintf("%c", n)
+					s = substr(s, 4)
+					continue
+				}
+			}
+			if (c == "+") { out = out " "; s = substr(s, 2); continue }
+			out = out c
+			s = substr(s, 2)
+		}
+		printf "%s", out
+	}'
+}
+
+# ---- 取参数（GET 的 query string；POST 且没有 query string 时读请求体）------
+QS="${QUERY_STRING:-}"
+if [ -z "$QS" ] && [ "${REQUEST_METHOD:-GET}" = "POST" ] && [ -n "${CONTENT_LENGTH:-}" ] \
+	&& [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
+	QS=$(head -c "$CONTENT_LENGTH")
+fi
+
+TOKEN=""
+CMD=""
+KW=""
+LIMIT=""
+N=""
+WECHAT=""
+_oldifs="$IFS"
+IFS='&'
+for _pair in $QS; do
+	_key=${_pair%%=*}
+	_val=${_pair#*=}
+	[ "$_val" = "$_pair" ] && _val=""
+	_key=$(urldecode "$_key")
+	_val=$(urldecode "$_val")
+	case "$_key" in
+	token) TOKEN="$_val" ;;
+	cmd) CMD="$_val" ;;
+	kw) KW="$_val" ;;
+	limit) LIMIT="$_val" ;;
+	n) N="$_val" ;;
+	esac
+done
+IFS="$_oldifs"
+
+# ---- 鉴权：先看端点开关，再校验 token（都必须通过）-------------------------
+if [ "$HTTP_ENABLED" != "1" ] || [ -z "$HTTP_TOKEN" ]; then
+	reply "403 Forbidden" '{"error":"endpoint disabled"}'
+fi
+if [ "$TOKEN" != "$HTTP_TOKEN" ]; then
+	reply "403 Forbidden" '{"error":"bad token"}'
+fi
+
+# ---- 子命令白名单（其余一律 400）-------------------------------------------
+case "$CMD" in
+	status | brief | groups | check | room-list | usage) set -- "$CMD" ;;
+rooms) set -- rooms "$KW" "$LIMIT" ;;
+history) set -- history "$N" ;;
+log) set -- log "$N" ;;
+wechat-status) WECHAT=status ;;
+wechat-enable) WECHAT=enable ;;
+wechat-test) WECHAT=test ;;
+wechat-qr) WECHAT=qr ;;
+*) reply "400 Bad Request" '{"error":"bad cmd"}' ;;
+esac
+
+# ---- 二维码：直接回 PNG 二进制（不是 JSON）----------------------------------
+if [ "$WECHAT" = "qr" ]; then
+	QRFILE=$(mktemp /tmp/powerfee.qr.XXXXXX)
+	QRERR=$(mktemp /tmp/powerfee.qrerr.XXXXXX)
+	if python3 /usr/lib/powerfee/wechat.py qr --out "$QRFILE" >/dev/null 2>"$QRERR" && [ -s "$QRFILE" ]; then
+		printf 'Status: 200 OK\r\n'
+		printf 'Content-Type: image/png\r\n'
+		printf 'Cache-Control: no-store\r\n'
+		printf 'Content-Length: %s\r\n' "$(wc -c <"$QRFILE" | tr -d ' ')"
+		printf '\r\n'
+		cat "$QRFILE"
+		rm -f "$QRFILE" "$QRERR"
+		exit 0
+	fi
+	QERR=$(head -c 300 "$QRERR" 2>/dev/null | tr -d '\r\n')
+	rm -f "$QRFILE" "$QRERR"
+	[ -n "$QERR" ] || QERR="wechat.py 没有输出 PNG（服务可能已登录，或还没打印二维码）"
+	QERR=$(printf '%s' "$QERR" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s", $0 }')
+	reply "404 Not Found" "{\"error\":\"qr unavailable\",\"detail\":\"$QERR\"}"
+fi
+
+# ---- 执行（stdout 就是 JSON；失败时也要回一个合法 JSON，别让机器人收到空响应）--
+ERRFILE=$(mktemp /tmp/powerfee.cgi.XXXXXX)
+if [ -n "$WECHAT" ]; then
+	OUT=$(/usr/bin/powerfee wechat "$WECHAT" 2>"$ERRFILE")
+	RC=$?
+else
+	OUT=$(/usr/bin/powerfee json "$@" 2>"$ERRFILE")
+	RC=$?
+fi
+if [ -n "$OUT" ]; then
+	rm -f "$ERRFILE"
+	reply "200 OK" "$OUT"
+fi
+ERR=$(head -c 300 "$ERRFILE" 2>/dev/null | tr -d '\r\n')
+rm -f "$ERRFILE"
+if [ -z "$ERR" ]; then
+	ERR="powerfee json 无输出（退出码 $RC）"
+fi
+ERR=$(printf '%s' "$ERR" | awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s", $0 }')
+reply "200 OK" "{\"ok\":false,\"error\":\"$ERR\"}"

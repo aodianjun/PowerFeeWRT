@@ -1,0 +1,20 @@
+# ClawBot(微信) 推送服务 —— UCI 配置
+# 上游项目：https://github.com/Cp0204/WeClawBot-API （MIT 许可）
+#
+# 改完执行：uci commit weclawbot-api && /etc/init.d/weclawbot-api restart
+#
+# 扫码绑定（凭据写入 /etc/weclawbot/config/auth.json，权限 600，升级固件保留）：
+#   cd /etc/weclawbot && weclawbot-api bot
+#   控制台里：/login 扫码新增绑定，/bots 查看已绑定机器人
+#
+# API 端点示例（token / botid 见 /etc/weclawbot/config/auth.json）：
+#   POST http://<路由器IP>:26322/bots/<botid>/messages
+#        -H "Authorization: Bearer <token>" -H 'Content-Type: application/json'
+#        -d '{"text":"你好"}'
+
+config weclawbot-api 'main'
+	# 总开关：0 = 不启动服务（配置与凭据保留）
+	option enabled '1'
+
+	# HTTP API 监听端口（上游默认 26322）
+	option port '26322'

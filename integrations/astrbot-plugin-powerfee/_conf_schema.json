@@ -1,0 +1,55 @@
+{
+  "endpoint": {
+    "type": "string",
+    "description": "powerfee 查询端点 URL",
+    "default": "",
+    "hint": "路由器 uhttpd 上的 CGI 地址，例如 https://192.168.1.1:8443/cgi-bin/powerfee（自签证书）。留空时 /电费 会提示未配置。",
+    "obvious_hint": true
+  },
+  "token": {
+    "type": "string",
+    "description": "查询 token（对应路由器 UCI 里的 http_token）",
+    "default": "",
+    "hint": "端点会校验 ?token=；留空也能试（端点未启用 token 时可用），但建议设置。"
+  },
+  "verify_tls": {
+    "type": "bool",
+    "description": "校验 HTTPS 证书",
+    "default": false,
+    "hint": "路由器用的是自签证书，保持关闭（等价于 curl -k）。"
+  },
+  "timeout": {
+    "type": "int",
+    "description": "单次请求超时（秒）",
+    "default": 15,
+    "hint": "查询端点会真的去访问学校接口，可能慢一点；超时就报错。"
+  },
+  "allow_admins": {
+    "type": "bool",
+    "description": "允许 AstrBot 管理员使用",
+    "default": true,
+    "hint": "管理员在 AstrBot 的 admins_id 里配置。"
+  },
+  "allow_users": {
+    "type": "list",
+    "description": "允许的用户 ID 白名单",
+    "default": [],
+    "hint": "填 QQ 号 / 用户 ID（字符串）。私聊里匹配发送者，群里也匹配发送者。"
+  },
+  "allow_groups": {
+    "type": "list",
+    "description": "允许的群 ID 白名单",
+    "default": [],
+    "hint": "填群号（字符串）。群里任何人发 /电费 都会被放行，谨慎添加。"
+  },
+  "max_rooms": {
+    "type": "int",
+    "description": "房间 / 历史列表最多显示多少条",
+    "default": 15
+  },
+  "default_unit": {
+    "type": "string",
+    "description": "余额单位（端点没返回 unit 时显示）",
+    "default": "度"
+  }
+}

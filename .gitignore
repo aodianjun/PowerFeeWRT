@@ -1,0 +1,21 @@
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+
+# ---- 日志与轮转文件 ----
+*.log
+*.old
+
+# ---- 系统垃圾 ----
+.DS_Store
+Thumbs.db
+
+# ---- 签名私钥（绝不能提交；公钥 signing/*.pem 可以提交）----
+*.key
+*.key.pem
+signing/private/
+signing/*.key
+signing/*-key.pem
+
+# ---- 本地临时工作目录（SSH 助手等，含路由器地址/口令，绝不入库）----
+pf_work/

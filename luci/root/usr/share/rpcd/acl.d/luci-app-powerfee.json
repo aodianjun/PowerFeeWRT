@@ -1,0 +1,24 @@
+{
+	"luci-app-powerfee": {
+		"description": "宿舍电量哨兵：读写 powerfee 配置、执行 /usr/bin/powerfee 与 /etc/init.d/powerfee、启动微信服务（weclawbot-api）、查看服务状态",
+		"read": {
+			"file": {
+				"/usr/bin/powerfee": [ "exec" ],
+				"/etc/init.d/powerfee": [ "exec" ],
+				"/etc/init.d/weclawbot-api": [ "exec" ]
+			},
+			"ubus": {
+				"service": [ "list" ]
+			},
+			"uci": [ "powerfee" ]
+		},
+		"write": {
+			"file": {
+				"/usr/bin/powerfee": [ "exec" ],
+				"/etc/init.d/powerfee": [ "exec" ],
+				"/etc/init.d/weclawbot-api": [ "exec" ]
+			},
+			"uci": [ "powerfee" ]
+		}
+	}
+}
